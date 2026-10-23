@@ -1,0 +1,20 @@
+{
+  "companyAnnouncements": [
+    "The librarian is in. Drop copies into inbox/ and run /shelve, or run /withdraw to take a source out."
+  ],
+  "spinnerVerbs": {
+    "mode": "replace",
+    "verbs": ["Reading", "Shelving", "Cataloguing", "Collating", "Excerpting", "Indexing", "Cross-referencing", "Glossing", "Leafing through"]
+  },
+  "spinnerTipsOverride": {
+    "tips": [
+      "Drop copies into inbox/, then run /shelve.",
+      "Run /withdraw to take a source out of the library.",
+      "Run /digest on a head to write its map from its sources.",
+      "Cite a source on a page as [@slug, place].",
+      "Every head starts in private/. Move its folder into heads/ to publish it.",
+      "A source stays private until you run bin/commonplace.py identify ID public:yes.",
+      "Arrange shelf/ in any folders you like, and keep each link's name."
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+# Activate once per clone: `lefthook install`
+pre-commit:
+  commands:
+    # The commit as staged, not the files on disk, may not cite a source the library lacks or name a private one.
+    check-pages:
+      run: bin/commonplace.py check-pages --staged
+    gitleaks:
+      run: gitleaks git --pre-commit --staged --redact --verbose
+    # Python is held to the editor's own bar, plus a ceiling on cognitive complexity.
+    ruff:
+      glob: "*.py"
+      run: ruff check {staged_files} && ruff format --check {staged_files}
+    ty:
+      glob: "bin/**/*.py"
+      # The tool declares its dependencies inline, so ty checks it against the environment uv builds for it,
+      # and finds the tool's own modules where the script finds them, beside it in bin/.
+      run: uv sync --quiet --script bin/commonplace.py && ty check --extra-search-path bin --python "$(uv python find --script bin/commonplace.py)" {staged_files}
+    # Text-making is tested through its interface: every word kept, every proofreading slip caught.
+    tests:
+      glob: "{bin,tests}/**/*.{py,lua}"
+      run: uv run --quiet --python 3.14 --with pytest --with pypdf --with pyyaml --with pyobjc-framework-Vision --with pyobjc-framework-Quartz pytest tests -q
+    complexity:
+      glob: "*.py"
+      run: uvx complexipy {staged_files}  # a function above complexipy's default ceiling of 15 fails the commit
+
+pre-push:
+  commands:
+    # Every commit about to be published is checked again, which catches one committed with --no-verify.
+    check-pages:
+      use_stdin: true
+      run: bin/commonplace.py check-pages --pushed

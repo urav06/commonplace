@@ -1,0 +1,15 @@
+version = 1
+
+# Writing is CC BY-SA 4.0 unless a later entry says otherwise; code and configuration are MIT.
+# Quoted passages inside pages remain their authors' and are covered by neither.
+# When several entries match a file, the last one wins.
+
+[[annotations]]
+path = "**"
+SPDX-FileCopyrightText = "2026 Urav"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+[[annotations]]
+path = ["bin/**", "tests/**", ".claude/**", "CLAUDE.md", "*.toml", "*.yml", ".gitignore", ".obsidian/**"]
+SPDX-FileCopyrightText = "2026 Urav"
+SPDX-License-Identifier = "MIT"

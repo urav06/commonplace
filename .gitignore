@@ -1,0 +1,22 @@
+# The library itself, never tracked
+/calibre/
+/shelf/
+/texts/
+/inbox/*
+!/inbox/.keep
+
+# Private heads and loose pages
+/private/
+
+# Tooling residue
+__pycache__/
+*.py[codz]
+*$py.class
+
+.ruff_cache/
+.complexipy_cache/
+.DS_Store
+
+# Obsidian state that differs per device
+.obsidian/workspace*.json
+.trash/

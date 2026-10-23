@@ -1,0 +1,10 @@
+{
+  "userIgnoreFilters": [
+    "calibre/",
+    "shelf/",
+    "texts/"
+  ],
+  "useMarkdownLinks": false,
+  "newLinkFormat": "absolute",
+  "alwaysUpdateLinks": true
+}
