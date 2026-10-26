@@ -13,6 +13,7 @@ Operations, each on numbered draft lines:
     {"op": "heading", "line": N, "level": L}
     {"op": "para", "lines": [N, …]}                           lines that start a paragraph
     {"op": "join", "lines": [N, …]}                           lines the next line runs on from with no space
+    {"op": "note", "from": N, "to": M}                        the page's notes, set after the paragraph they interrupt
     {"op": "confirm", "words": "…"}                           words read off the image that no machine read
 `keep_hyphen` is the name `join` had before; proofs saved with it apply as they did.
 """
@@ -22,7 +23,7 @@ import re
 import unicodedata
 from collections import Counter
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Final
 
@@ -36,6 +37,8 @@ ADDED: Final    = re.compile(r"^> \[(?:Described by the librarian|Figure, descri
 # Words, numbers, and the symbols that carry meaning; punctuation and leftover markup are no reading's business.
 TOKEN: Final    = re.compile(r"[^\W\d_]+|\d+(?:\.\d+)?|\.\d+|[^\w\s.,;:!?'\"“”‘’„«»()\[\]{}\-–—/^*#|`~_\\]")
 # Superscripts mark notes and powers, which machines seldom read, so the check leaves them out.
+# A paragraph that opens on a note marker is a note.
+NOTE: Final     = re.compile(r"\^\d")
 SUPERSCRIPT: Final = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁱⁿ]+")
 # A stretch this long, missing as a word, still counts when a reading spells it across a space or a hyphen.
 SPLIT_WORD: Final = 5
@@ -80,6 +83,7 @@ class Piece:
     kind: str = "line"  # line | block | marker
     starts: bool = False  # a line that starts a paragraph
     joins: bool = False  # the next line runs on from this one with no space
+    note: bool = False  # a note's line or block, which runs on in the notes, apart from the running text
 
 
 @dataclass
@@ -90,6 +94,7 @@ class Page:
     kinds: dict[int, str]  # line | block | gone
     starts: set[int] = field(default_factory=set)
     joins: set[int] = field(default_factory=set)
+    notes: set[int] = field(default_factory=set)
     inserts: dict[int, list[Piece]] = field(default_factory=dict)
     order: list[int] = field(default_factory=list)
 
@@ -115,16 +120,30 @@ def apply(draft: list[str], ops: list[dict]) -> Applied:
     for n in page.order:
         if page.kinds[n] != "gone" and page.lines[n].strip():
             kind = "line" if page.kinds[n] == "line" else "block"
-            out.pieces.append(Piece(page.lines[n].strip(), kind, n in page.starts, n in page.joins))
-        out.pieces += page.inserts.get(n, [])
+            text, note = page.lines[n].strip(), n in page.notes
+            out.pieces.append(Piece(text, kind, starts=n in page.starts, joins=n in page.joins, note=note))
+        # What is added among the notes is set with them, but a page marker always stays in the running text.
+        out.pieces += [
+            replace(p, note=n in page.notes and p.kind != "marker") for p in page.inserts.get(n, [])
+        ]
     return out
 
 
 def one(op: dict, page: Page, confirmed: list[str]) -> str | None:
     """Apply one operation to the page, or say why it cannot be applied."""
+    try:
+        return operate(op, page, confirmed)
+    except (KeyError, TypeError) as error:
+        return f"{op!r} lacks or mistypes {error}"
+
+
+def operate(op: dict, page: Page, confirmed: list[str]) -> str | None:
+    """One operation, applied, or why it cannot be; `one` turns a malformed one into a problem too."""
     kind = op.get("op")
     if (missing := [n for n in numbers(op) if n not in page.lines]) and kind != "insert":
         return f"{kind} names lines {missing} that the draft lacks"
+    if isinstance(op.get("from"), int) and isinstance(op.get("to"), int) and op["from"] > op["to"]:
+        return f"{kind} runs backwards, from line {op['from']} to line {op['to']}"
     match kind:
         case "edit" if op["find"] not in page.lines[op["line"]]:
             return f"edit on line {op['line']}: {op['find']!r} is not in {page.lines[op['line']]!r}"
@@ -146,6 +165,8 @@ def one(op: dict, page: Page, confirmed: list[str]) -> str | None:
             page.starts.update(op["lines"])
         case "join" | "keep_hyphen":
             page.joins.update(op["lines"])
+        case "note":
+            page.notes.update(range(op["from"], op["to"] + 1))
         case "confirm":
             confirmed.append(op["words"])
         case "move":
@@ -177,30 +198,61 @@ def assemble(pages: list[list[Piece]]) -> str:
     A paragraph runs on across lines and pages until a line starts a new one. A line marked to join runs into the
     next with no space. A line-end hyphen before a lowercase line is a word broken by the typesetter, so it goes.
     A page marker inside a running paragraph lands after the word that spans the page turn, so the word stays whole.
+
+    Notes run apart from the running text, so a paragraph that crosses the page turn runs past its page's notes,
+    and they follow it once it closes. A note open at a page's end runs on into the next page's notes when their
+    first line starts no new note.
     """
-    blocks, para, waiting, joins = [], "", [], False
-    for piece in (p for page in pages for p in page):
-        if piece.kind == "block":
-            blocks, para = [*flushed(blocks, para, waiting), piece.text], ""
-        elif piece.kind == "marker" and para:
-            waiting.append(piece.text)
-        elif piece.kind == "marker":
-            blocks.append(piece.text)
-        elif piece.starts or not para:
-            blocks, para = flushed(blocks, para, waiting), piece.text
+    blocks, body, note = [], Flow(), Flow()
+    for page in pages:
+        if not carries_on(page):
+            body.held += note.close()
+        for piece in page:
+            if piece.note and piece.kind == "line":
+                body.held += note.add(piece)
+            elif piece.note:
+                body.held += [*note.close(), piece.text]
+            elif piece.kind == "marker" and body.para:
+                body.waiting.append(piece.text)
+            elif piece.kind == "line":
+                blocks += body.add(piece)
+            else:
+                blocks += [*body.close(), piece.text]
+    body.held += note.close()
+    return "\n\n".join(blocks + body.close()) + "\n"
+
+
+@dataclass
+class Flow:
+    """Paragraphs running on across lines and pages, as the running text or the notes."""
+
+    para: str = ""  # the paragraph still open
+    joins: bool = False  # its last line runs on into the next with no space
+    # The running text's alone, as page markers and notes never land inside a note:
+    waiting: list[str] = field(default_factory=list)  # page markers met inside it, to set at its next join
+    held: list[str] = field(default_factory=list)  # notes met while it was open, to set after it
+
+    def add(self, line: Piece) -> list[str]:
+        """Run the line on in the open paragraph, or start a new one with it; what that closed."""
+        if line.starts or not self.para:
+            closed, self.para = self.close(), line.text
         else:
-            para = joined(para, piece.text, waiting, joins=joins)
-        if piece.kind == "line":
-            joins = piece.joins
-    return "\n\n".join(flushed(blocks, para, waiting)) + "\n"
+            closed, self.para = [], joined(self.para, line.text, self.waiting, joins=self.joins)
+        self.joins = line.joins
+        return closed
+
+    def close(self) -> list[str]:
+        """The open paragraph, closed, then the notes held for it and any page marker still waiting."""
+        out = [self.para] if self.para.strip() else []
+        out += self.held + self.waiting
+        self.para, self.held, self.waiting = "", [], []
+        return out
 
 
-def flushed(blocks: list[str], para: str, waiting: list[str]) -> list[str]:
-    """The blocks with the paragraph closed, and any page marker still waiting set after it."""
-    out = [*blocks, para] if para.strip() else list(blocks)
-    out += waiting
-    waiting.clear()
-    return out
+def carries_on(page: list[Piece]) -> bool:
+    """The page's notes begin by running on the last note of the page before."""
+    first = next((p for p in page if p.note), None)
+    return first is not None and first.kind == "line" and not first.starts
 
 
 def joined(para: str, line: str, waiting: list[str], *, joins: bool) -> str:
@@ -283,6 +335,11 @@ def check(proof: Proof, witnesses: list[str]) -> list[str]:
     flags += [
         f"no machine read the bracketed words in {s!r}; confirm them on the image or fix them"
         for s in unsupported(plain(assemble([applied.pieces])), witnesses, applied.confirmed)
+    ]
+    flags += [
+        f"{p.text[:40]!r} opens on a note marker: mark the page's notes with a note operation"
+        for p in applied.pieces
+        if (p.starts or p.kind == "block") and not p.note and NOTE.match(p.text)
     ]
     if not any(p.kind == "marker" for p in applied.pieces):
         flags.append("no page marker: insert the printed page number first, as <!-- page N -->")

@@ -36,6 +36,7 @@ Line numbers always refer to the draft as given; the program applies every opera
 - `{"op": "move", "from": N, "to": M, "after": K}` puts lines in reading order; `"after": 0` puts them first.
 - `{"op": "heading", "line": N, "level": L}` marks a heading.
 - `{"op": "para", "lines": [N, …]}` lists every line that starts a paragraph, list item, note or quotation. Leave the page's first line out when it carries on the previous page's paragraph.
+- `{"op": "note", "from": N, "to": M}` marks lines N to M as the page's notes, usually the footnotes at its foot; a page with notes in two places takes one `note` each. Notes run apart from the text: the program sets them after the paragraph that runs over the page turn, so leave them where the draft has them and never move them before it. Inside them, `para` starts each note. When the page's first note carries on the last note of the page before, leave its first line out of `para` and keep it lines rather than a `block`, and it joins that note.
 - `{"op": "keep_hyphen", "lines": [N, …]}` lists lines whose final hyphen belongs to the word, as in "long-" before "term". Every other line-end hyphen goes when the next line starts lowercase.
 - `{"op": "block", "from": N, "to": M, "markdown": "…"}` replaces lines with Markdown that stands alone: a table, a display equation, a caption, a note.
 - `{"op": "rewrite", "from": N, "to": M, "markdown": "…"}` replaces lines with running text that flows on in its paragraph, for a passage the machines garbled past editing.

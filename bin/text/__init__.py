@@ -29,7 +29,7 @@ from shell import run
 from . import epub, pdf, proof
 
 # Raise it whenever the way texts are made changes, so every text is made again.
-VERSION: Final = 3
+VERSION: Final = 4
 STAMP: Final = re.compile(r"<!-- commonplace text (\d+) of ([0-9a-f]+) by (\w+) -->")
 PROBLEM: Final = re.compile(r"^<!-- problem: (.*) -->$")
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, NameObject
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
@@ -161,6 +162,77 @@ def test_a_word_broken_across_the_page_turn_is_rejoined() -> None:
     assert proof.assemble([first.pieces, second.pieces]).strip() == "the information <!-- page 5 --> given."
 
 
+PAGE_6 = {"op": "insert", "after": 0, "markdown": "<!-- page 6 -->"}
+NOTE_2 = {"op": "note", "from": 2, "to": 2}
+
+
+def paragraphs(*pages: tuple[list[str], list[dict]]) -> list[str]:
+    """The pages, each a draft and its operations, assembled into one text's paragraphs."""
+    return proof.assemble([proof.apply(draft, ops).pieces for draft, ops in pages]).strip().split("\n\n")
+
+
+def test_a_note_waits_for_the_paragraph_that_runs_over_the_page_turn() -> None:
+    assert paragraphs(
+        (["Workers find jobs through", "^1 Counted in 1970."], [{"op": "para", "lines": [1, 2]}, NOTE_2]),
+        (["friends, mostly.", "A new paragraph."], [PAGE_6, {"op": "para", "lines": [2]}]),
+    ) == [
+        "Workers find jobs through friends, <!-- page 6 --> mostly.",
+        "^1 Counted in 1970.",
+        "A new paragraph.",
+    ]
+
+
+def test_a_word_broken_over_the_page_turn_stays_whole_past_a_note_block() -> None:
+    note = [{"op": "block", "from": 2, "to": 3, "markdown": "^1 A note."}, {"op": "note", "from": 2, "to": 3}]
+    assert paragraphs(
+        (["The market for employ-", "^1 a note", "on two lines"], [{"op": "para", "lines": [1]}, *note]),
+        (["ment is thin."], [PAGE_6]),
+    ) == ["The market for employment <!-- page 6 --> is thin.", "^1 A note."]
+
+
+def test_a_note_runs_on_into_the_next_pages_notes() -> None:
+    assert paragraphs(
+        (
+            ["Body", "^1 The first note runs", "^2 The second note is cut off mid-sen-"],
+            [{"op": "para", "lines": [1, 2, 3]}, {"op": "note", "from": 2, "to": 3}],
+        ),
+        (
+            ["runs on.", "Next paragraph.", "tence, and ends.", "^3 A third note."],
+            [PAGE_6, {"op": "para", "lines": [2, 4]}, {"op": "note", "from": 3, "to": 4}],
+        ),
+    ) == [
+        "Body runs <!-- page 6 --> on.",
+        "^1 The first note runs",
+        "Next paragraph.",
+        "^2 The second note is cut off mid-sentence, and ends.",
+        "^3 A third note.",
+    ]
+
+
+def test_notes_of_a_page_whose_last_paragraph_closes_come_before_the_next_page() -> None:
+    assert paragraphs(
+        (["Body ends.", "^1 A note."], [{"op": "para", "lines": [1, 2]}, NOTE_2]),
+        (["New paragraph."], [PAGE_6, {"op": "para", "lines": [1]}]),
+    ) == ["Body ends.", "^1 A note.", "<!-- page 6 -->", "New paragraph."]
+
+
+def test_what_is_added_among_the_notes_goes_with_them() -> None:
+    described = {"op": "insert", "after": 2, "markdown": "> [Described by the librarian: a chart]"}
+    assert paragraphs(
+        (["Body runs", "^1 A note."], [{"op": "para", "lines": [1, 2]}, NOTE_2, described]),
+        (["on."], [PAGE_6]),
+    ) == ["Body runs on. <!-- page 6 -->", "^1 A note.", "> [Described by the librarian: a chart]"]
+
+
+def test_check_flags_notes_left_unmarked_and_malformed_or_backward_note_operations() -> None:
+    draft = ["Body.", "^1 A note."]
+    ops = [{"op": "insert", "after": 0, "markdown": "<!-- page 1 -->"}, {"op": "para", "lines": [1, 2]}]
+    assert any("note marker" in f for f in proof.check(proof.Proof(1, "f", draft, ops), draft))
+    assert proof.check(proof.Proof(1, "f", draft, [*ops, NOTE_2]), draft) == []
+    bad = [{"op": "note", "lines": [2]}, {"op": "note", "from": 2, "to": 1}]
+    assert len(proof.apply(draft, bad).problems) == 2
+
+
 def test_a_wrapped_web_address_joins_when_marked() -> None:
     applied = proof.apply(
         ["See https://doi.org/10.1016/j.", "lindif.2014.05.002 for data."], [{"op": "join", "lines": [1]}]
@@ -244,3 +316,17 @@ def test_fingerprints_ignore_metadata(tmp_path: Path) -> None:
     writer.add_metadata({"/Title": "Rewritten by Calibre"})
     writer.write(second)
     assert [p.fingerprint for p in pdf.pages(first)] == [p.fingerprint for p in pdf.pages(second)]
+
+
+def test_fingerprints_change_with_the_words_a_page_prints(tmp_path: Path) -> None:
+    def printing(words: bytes, name: str) -> Path:
+        writer = PdfWriter()
+        page = writer.add_blank_page(612, 792)
+        stream = DecodedStreamObject()
+        stream.set_data(b"BT /F1 12 Tf 72 720 Td (" + words + b") Tj ET")
+        page[NameObject("/Contents")] = writer._add_object(stream)
+        writer.write(path := tmp_path / name)
+        return path
+
+    pears, plums = pdf.pages(printing(b"pears", "a.pdf")), pdf.pages(printing(b"plums", "b.pdf"))
+    assert pears[0].fingerprint != plums[0].fingerprint

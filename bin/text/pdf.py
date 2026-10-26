@@ -63,7 +63,8 @@ def images(page) -> list:
 def fingerprint(page) -> str:
     """A hash of the page's content stream and every image it draws."""
     contents = page.get_contents()
-    digest = hashlib.sha256(contents.get_data() if contents else b"")
+    # A content stream counts as empty in a test of truth, so only None means the page has none.
+    digest = hashlib.sha256(contents.get_data() if contents is not None else b"")
     for name, image in images(page):
         digest.update(name.encode() + image._data)  # as stored: decoding a scan needs tools a hash does not
     return digest.hexdigest()[:16]
